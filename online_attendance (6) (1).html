@@ -1,0 +1,206 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Firebase 多班級即時點名系統</title>
+  <style>
+    body {
+      font-family: "微軟正黑體", sans-serif;
+      margin: 20px;
+      background-color: #f9f9f9;
+      color: #333;
+    }
+    h1 {
+      color: #005baa;
+      text-align: center;
+    }
+    .container {
+      max-width: 600px;
+      margin: 0 auto;
+      padding: 20px;
+      background-color: white;
+      border-radius: 10px;
+      box-shadow: 0 0 10px rgba(0,0,0,0.1);
+    }
+    .student-entry {
+      padding: 10px;
+      border: 1px solid #ddd;
+      border-radius: 5px;
+      margin-bottom: 8px;
+      background-color: #f0f0f0;
+    }
+    .student-entry label {
+      margin-right: 15px;
+    }
+    input[type="radio"], input[type="date"], select, textarea {
+      font-size: 16px;
+    }
+    textarea {
+      width: 100%;
+      margin-top: 10px;
+      resize: vertical;
+    }
+    button {
+      width: 100%;
+      padding: 12px;
+      font-size: 16px;
+      margin: 10px 0;
+      border-radius: 5px;
+      border: none;
+      background-color: #4CAF50;
+      color: white;
+      cursor: pointer;
+    }
+    button:hover {
+      background-color: #45a049;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>Firebase 多班級即時點名系統</h1>
+    <select id="classSelect">
+      <option value="class1">第一班</option>
+      <option value="class2">第二班</option>
+      <option value="class3">第三班</option>
+      <option value="class4">第四班</option>
+      <option value="class5">第五班</option>
+    </select>
+    <input type="date" id="attendanceDate">
+    <div id="studentList"></div>
+    <button onclick="saveAttendance()">📥 儲存點名</button>
+    <h2>📌 即時缺席名單：</h2>
+    <ul id="absentList"></ul>
+  </div>
+
+  <!-- Firebase SDK -->
+  <script src="https://www.gstatic.com/firebasejs/9.22.1/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.22.1/firebase-database-compat.js"></script>
+  <script>
+    const firebaseConfig = {
+      apiKey: "AIzaSyC-Md9B2sSZnlfa-M_R1eEsFGK2gpoP4Ls",
+      authDomain: "tmpsafterschool.firebaseapp.com",
+      databaseURL: "https://tmpsafterschool-default-rtdb.firebaseio.com",
+      projectId: "tmpsafterschool",
+      storageBucket: "tmpsafterschool.appspot.com",
+      messagingSenderId: "747968667505",
+      appId: "1:747968667505:web:31e0b2983543bbb5bd60d0",
+      measurementId: "G-HVYGDY0L7J"
+    };
+
+    firebase.initializeApp(firebaseConfig);
+    const db = firebase.database();
+
+    const studentsByClass = {
+      class1: ["王小明", "李小美", "張大仁"],
+      class2: ["陳小安", "林小慧", "鄭小華"],
+      class3: ["黃志明", "蔡佳玲", "吳俊賢"],
+      class4: ["周子翔", "謝怡君", "洪志強"],
+      class5: ["劉冠廷", "許美玲", "張雅文"]
+    };
+
+    const categories = ["出席", "返家", "社團", "缺席"];
+
+    const classSelect = document.getElementById("classSelect");
+    const attendanceDate = document.getElementById("attendanceDate");
+    const studentList = document.getElementById("studentList");
+    const absentList = document.getElementById("absentList");
+
+    function renderStudentList(classId) {
+      studentList.innerHTML = "";
+      const students = studentsByClass[classId] || [];
+      students.forEach((name, idx) => {
+        const div = document.createElement("div");
+        div.className = "student-entry";
+        const nameDiv = document.createElement("div");
+        nameDiv.textContent = name;
+        div.appendChild(nameDiv);
+
+        categories.forEach(status => {
+          const label = document.createElement("label");
+          const radio = document.createElement("input");
+          radio.type = "radio";
+          radio.name = `status-${idx}`;
+          radio.value = status;
+          label.appendChild(radio);
+          label.appendChild(document.createTextNode(status));
+          div.appendChild(label);
+        });
+
+        const remark = document.createElement("textarea");
+        remark.placeholder = "備註...";
+        remark.id = `remark-${idx}`;
+        div.appendChild(remark);
+        studentList.appendChild(div);
+      });
+    }
+
+    function saveAttendance() {
+      const classId = classSelect.value;
+      const date = attendanceDate.value;
+      if (!date) {
+        alert("請選擇日期");
+        return;
+      }
+      const students = studentsByClass[classId] || [];
+      const attendanceData = {};
+      students.forEach((name, idx) => {
+        const radios = document.getElementsByName(`status-${idx}`);
+        let status = "未標記";
+        for (const r of radios) {
+          if (r.checked) {
+            status = r.value;
+            break;
+          }
+        }
+        const remark = document.getElementById(`remark-${idx}`).value.trim();
+        attendanceData[name] = { status, remark };
+      });
+      db.ref(`attendance/${classId}/${date}`).set(attendanceData)
+        .then(() => alert("✅ 點名已儲存！"))
+        .catch(err => alert("❌ 儲存失敗：" + err));
+    }
+
+    function listenAbsent(classId, date) {
+      absentList.innerHTML = "";
+      if (!date) return;
+      db.ref(`attendance/${classId}/${date}`).on("value", snapshot => {
+        absentList.innerHTML = "";
+        const data = snapshot.val();
+        if (!data) {
+          absentList.textContent = "尚無資料";
+          return;
+        }
+        const absentStudents = [];
+        for (const [name, record] of Object.entries(data)) {
+          if (record.status === "缺席") {
+            absentStudents.push(`${name}（${record.remark || "無備註"}）`);
+          }
+        }
+        if (absentStudents.length === 0) {
+          absentList.textContent = "無缺席學生";
+        } else {
+          absentStudents.forEach(name => {
+            const li = document.createElement("li");
+            li.textContent = name;
+            absentList.appendChild(li);
+          });
+        }
+      });
+    }
+
+    function refresh() {
+      const classId = classSelect.value;
+      const date = attendanceDate.value;
+      renderStudentList(classId);
+      db.ref(`attendance/${classId}/${date}`).off();
+      if (date) listenAbsent(classId, date);
+    }
+
+    classSelect.addEventListener("change", refresh);
+    attendanceDate.addEventListener("change", refresh);
+    window.onload = refresh;
+  </script>
+</body>
+</html>
